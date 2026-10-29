@@ -21,12 +21,12 @@ async function postJSON(url, headers, body, timeoutMs = 30_000) {
   return data;
 }
 
-// ---- Groq (free tier: ~30 req/min, ~1,000 req/day on llama-3.3-70b) ----
+// ---- Groq (free tier: ~30 req/min, ~1,000 req/day on gpt-oss-120b) ----
 const groq = {
   name: "groq",
   enabled: Boolean(env.GROQ_API_KEY),
   vision: false,
-  model: env.GROQ_MODEL || "llama-3.3-70b-versatile",
+  model: env.GROQ_MODEL || "openai/gpt-oss-120b",
   async generate({ system, prompt, maxTokens }) {
     const data = await postJSON(
       "https://api.groq.com/openai/v1/chat/completions",
@@ -37,9 +37,10 @@ const groq = {
           { role: "system", content: system },
           { role: "user", content: prompt },
         ],
-        max_tokens: maxTokens,
+        max_tokens: maxTokens + 1200, // headroom: gpt-oss models spend some tokens reasoning first
         temperature: 0.9,
         response_format: { type: "json_object" },
+        ...(this.model.includes("gpt-oss") ? { reasoning_effort: "low" } : {}),
       },
     );
     return data?.choices?.[0]?.message?.content || "";
