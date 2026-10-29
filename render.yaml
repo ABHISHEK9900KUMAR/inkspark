@@ -1,0 +1,31 @@
+# Render Blueprint – lets Render set up the service from this file.
+# Render dashboard → New → Blueprint → pick this repo.
+services:
+  - type: web
+    name: inkspark
+    runtime: node
+    plan: free            # free: sleeps after ~15 min idle
+    region: singapore     # closest Render region to India
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: GROQ_API_KEY
+        sync: false       # paste in the Render dashboard; never commit keys
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: PROVIDERS
+        value: groq,gemini
+      - key: RATE_PER_MINUTE
+        value: "6"
+      - key: RATE_PER_DAY
+        value: "40"
+      - key: MAX_CONCURRENT
+        value: "4"
