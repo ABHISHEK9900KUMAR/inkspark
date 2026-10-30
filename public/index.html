@@ -11,10 +11,11 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Figtree:wght@400;500;600&family=Fraunces:ital,wght@0,400;0,600;1,400&family=Caveat:wght@500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <div id="mood" class="mood" aria-hidden="true"></div>
   <div class="app">
     <header class="top">
       <a class="brand" href="/" aria-label="INKSPARK home">
@@ -45,16 +46,6 @@
 
     <footer class="composer">
       <div class="controls">
-        <label>Help me
-          <select id="mode">
-            <option value="auto">Choose for me</option>
-            <option value="continue">Continue the poem</option>
-            <option value="ending">Write an ending</option>
-            <option value="rhyme">Make it rhyme</option>
-            <option value="vivid">Add vivid imagery</option>
-            <option value="twist">Take a surprising turn</option>
-          </select>
-        </label>
         <label>Lines to add
           <select id="count">
             <option value="2">1–2</option>
@@ -66,9 +57,6 @@
           <select id="voice">
             <option>English</option>
             <option>Hindi</option>
-            <option>Hinglish</option>
-            <option>Urdu</option>
-            <option>Bengali</option>
           </select>
         </label>
       </div>
@@ -77,6 +65,9 @@
         <textarea id="input" rows="2" placeholder="Write your first line here… I'll help with the rest" aria-label="Your lines"></textarea>
         <button type="button" class="icon-btn" id="poemBtn" title="See your whole poem" aria-label="See your whole poem">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l4-1L19 8l-3-3L5 16zM14 6l3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        </button>
+        <button type="button" class="icon-btn" id="micBtn" title="Speak your lines" aria-label="Speak your lines">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M5 11a7 7 0 0014 0M12 18v3" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
         </button>
         <label class="icon-btn" title="Start from a picture" aria-label="Start from a picture">
           <input type="file" id="image" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
@@ -91,9 +82,19 @@
   <dialog id="poemDialog">
     <h2 id="poemTitle">Your poem</h2>
     <pre id="poemText"></pre>
+    <div class="cardbox">
+      <canvas id="cardPreview" width="1080" height="1350"></canvas>
+      <div class="cardnav">
+        <button type="button" class="ghost-btn" id="cardPrev">Previous</button>
+        <span id="cardLabel"></span>
+        <button type="button" class="ghost-btn" id="cardNext">Next</button>
+      </div>
+      <input id="cardName" placeholder="Your name (shows at the bottom)" maxlength="40" />
+    </div>
     <div class="dialog-actions">
       <button type="button" class="ghost-btn" id="copyPoem">Copy</button>
-      <button type="button" class="ghost-btn" id="downloadPoem">Download .txt</button>
+      <button type="button" class="ghost-btn" id="readPoem">Read aloud</button>
+      <button type="button" class="ghost-btn" id="saveCard">Save as card</button>
       <button type="button" class="spark-btn" id="closePoem">Close</button>
     </div>
   </dialog>
