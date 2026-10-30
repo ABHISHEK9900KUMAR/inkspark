@@ -90,28 +90,23 @@ function release() {
 
 // ---------- Prompting ----------
 const MODES = {
-  auto: "Choose whatever help suits these lines best: usually continue the poem naturally.",
-  continue: "Continue the poem from where it stops, keeping its rhythm and imagery.",
-  ending: "Write lines that bring the poem to a satisfying, resonant ending.",
-  rhyme: "Continue the poem using a clear rhyme scheme that fits the existing lines.",
-  vivid: "Continue with concrete, sensory imagery: sights, sounds, textures.",
-  twist: "Continue the poem but turn it somewhere unexpected while staying true to its feeling.",
+  auto: "Continue the writer's lines naturally from where they stop. If the text is a paragraph of feelings instead of poem lines, turn it into a short poem that keeps exactly the same emotions.",
+  story: "Continue the writer's lines as the opening of a short story, in simple prose lines, keeping the same feeling.",
 };
 const VOICES = {
   English: "Write in English.",
   Hindi: "Write in Hindi using Devanagari script.",
-  Hinglish: "Write in Hinglish (Hindi words in Roman script, mixed naturally with English).",
-  Urdu: "Write in Urdu using Urdu script.",
-  Bengali: "Write in Bengali using Bengali script.",
 };
 
-const SYSTEM = `You are INKSPARK, a gentle poetry companion. The user writes the start of a poem; you add a few lines.
-Rules:
-- Never change, repeat or correct the user's lines. Only add new lines after them.
-- Match the user's tone, tense, point of view and line length unless asked otherwise.
-- Keep it original and warm; avoid clichés and never quote existing published poems or songs.
-- If the user gives words and a tone instead of lines, write the opening lines of a poem using those words.
-- Reply with ONLY a JSON object, no prose, no code fences: {"lines": ["...", "..."], "title": "short optional title"}`;
+const SYSTEM = `You are INKSPARK, a gentle writing companion. The writer gives the start of a poem; you add only connecting lines so they stay the author.
+Style rules:
+- Never change, repeat or correct the writer's lines. Only add new lines after them.
+- Match their line length (often 2-5 words), use simple everyday words, and keep their main image.
+- Match their emotion exactly: no extra drama, no forced hope.
+- Never write the full poem or an ending unless the writer asks.
+- Keep it original; never quote published poems or songs.
+- If the writer gives words and a tone instead of lines, write only the opening lines using those words.
+- Reply with ONLY a JSON object, no prose, no code fences: {"lines": ["...", "..."], "title": "short title", "mood": "snow|rain|sunrise|none"} where mood is the feeling of the piece (snow = quiet/cold, rain = sad/longing, sunrise = hopeful/new, none otherwise)`;
 
 function buildPrompt({ poem, mode, count, voice, image }) {
   return [
@@ -121,7 +116,7 @@ function buildPrompt({ poem, mode, count, voice, image }) {
     `Task: ${MODES[mode] || MODES.auto}`,
     `Add exactly ${count} new line(s).`,
     VOICES[voice] || VOICES.English,
-    'Reply with only JSON: {"lines": [...], "title": "..."}',
+    'Reply with only JSON: {"lines": [...], "title": "...", "mood": "snow|rain|sunrise|none"}',
   ].join("\n");
 }
 
@@ -131,11 +126,11 @@ function parseLines(text) {
     try {
       const obj = JSON.parse(match[0]);
       if (Array.isArray(obj.lines)) {
-        return { lines: obj.lines.map(String).filter((l) => l.trim()), title: obj.title ? String(obj.title) : "" };
+        return { lines: obj.lines.map(String).filter((l) => l.trim()), title: obj.title ? String(obj.title) : "", mood: ["snow","rain","sunrise"].includes(obj.mood) ? obj.mood : "none" };
       }
     } catch { /* fall through */ }
   }
-  return { lines: text.split("\n").map((l) => l.trim()).filter(Boolean), title: "" };
+  return { lines: text.split("\n").map((l) => l.trim()).filter(Boolean), title: "", mood: "none" };
 }
 
 const MOCK_LINES = [
@@ -182,7 +177,7 @@ app.post("/api/spark", burstLimiter, dailyLimiter, async (req, res) => {
       await new Promise((r) => setTimeout(r, 600));
       const start = Math.floor(Math.random() * MOCK_LINES.length);
       const lines = Array.from({ length: n }, (_, i) => MOCK_LINES[(start + i) % MOCK_LINES.length]);
-      return res.json({ lines, title: "Mock spark", mock: true });
+      return res.json({ lines, title: "Mock spark", mood: "rain", mock: true });
     }
 
     // Tries each free provider in turn; if one is rate-limited, the next one answers.
@@ -192,9 +187,9 @@ app.post("/api/spark", burstLimiter, dailyLimiter, async (req, res) => {
       image: img,
       maxTokens: 400 + n * 60,
     });
-    const { lines, title } = parseLines(out);
+    const { lines, title, mood } = parseLines(out);
     if (!lines.length) return res.status(502).json({ error: "empty_reply", message: "The ink ran dry. Try again." });
-    res.json({ lines: lines.slice(0, n), title, provider });
+    res.json({ lines: lines.slice(0, n), title, mood, provider });
   } catch (err) {
     const status = err?.status;
     if (status === 429 || status === 529 || status === 503) {
