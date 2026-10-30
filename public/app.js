@@ -7,10 +7,10 @@
 const $ = (id) => document.getElementById(id);
 const els = {
   intro: $("intro"), thread: $("thread"), form: $("form"), input: $("input"), spark: $("spark"),
-  mode: $("mode"), count: $("count"), voice: $("voice"), status: $("status"),
+  count: $("count"), voice: $("voice"), status: $("status"),
   image: $("image"), attachment: $("attachment"), newChat: $("newChat"),
   poemBtn: $("poemBtn"), dialog: $("poemDialog"), poemText: $("poemText"), poemTitle: $("poemTitle"),
-  copyPoem: $("copyPoem"), downloadPoem: $("downloadPoem"), closePoem: $("closePoem"),
+  copyPoem: $("copyPoem"), readPoem: $("readPoem"), saveCard: $("saveCard"), cardPreview: $("cardPreview"), cardPrev: $("cardPrev"), cardNext: $("cardNext"), cardLabel: $("cardLabel"), cardName: $("cardName"), micBtn: $("micBtn"), closePoem: $("closePoem"),
 };
 
 const MIN_GAP_MS = 2500;
@@ -55,6 +55,8 @@ function poemTitle() {
 function render() {
   els.intro.hidden = turns.length > 0;
   els.thread.replaceChildren(...turns.flatMap((t, i) => renderTurn(t, i)));
+  const last = [...turns].reverse().find((t) => t.kept && t.result);
+  $("mood").className = "mood " + (last?.result?.mood || "none");
   els.thread.lastElementChild?.scrollIntoView({ block: "end", behavior: "smooth" });
 }
 
@@ -119,6 +121,7 @@ function renderTurn(t, i) {
       again.dataset.cooldown = "1";
       actions.append(again);
     }
+    if (isLast) actions.append(button("Continue into a story", () => { t.mode = "story"; spark(i, true); }));
     actions.append(button(t.kept ? "Discard these lines" : "Keep these lines", () => { t.kept = !t.kept; save(); render(); }));
     actions.append(button("Copy", () => copy(t.result.lines.join("\n"))));
     bot.append(poem, actions);
@@ -192,7 +195,7 @@ async function spark(index, isRetry = false) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         poem,
-        mode: els.mode.value,
+        mode: t.mode || "auto",
         count: Number(els.count.value),
         voice: els.voice.value,
         image: t.image ? { mediaType: t.image.mediaType, data: t.image.data } : null,
@@ -207,7 +210,7 @@ async function spark(index, isRetry = false) {
     } else if (!res.ok) {
       t.error = { message: data.message || "Something went wrong. Please try again." };
     } else {
-      t.result = { lines: data.lines || [], title: data.title || "" };
+      t.result = { lines: data.lines || [], title: data.title || "", mood: data.mood || "none" };
       t.kept = true;
       if (data.mock) status("Demo mode: add a free Groq or Gemini key in .env for real poems.");
     }
@@ -308,6 +311,7 @@ function openPoem() {
   els.poemTitle.textContent = poemTitle();
   els.poemText.textContent = text || "Nothing here yet. Write your first line!";
   els.dialog.showModal();
+  updateCard();
 }
 
 // ---------- wire up ----------
@@ -321,11 +325,152 @@ els.image.addEventListener("change", (e) => onImage(e.target.files[0]));
 els.poemBtn.addEventListener("click", openPoem);
 els.closePoem.addEventListener("click", () => els.dialog.close());
 els.copyPoem.addEventListener("click", () => copy(`${els.poemTitle.textContent}\n\n${fullPoem()}`));
-els.downloadPoem.addEventListener("click", () => {
-  const blob = new Blob([`${els.poemTitle.textContent}\n\n${fullPoem()}\n`], { type: "text/plain" });
-  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: "inkspark-poem.txt" });
-  a.click(); URL.revokeObjectURL(a.href);
+// ---------- read aloud (calm, with poem-like pauses) ----------
+function readAloud() {
+  if (!("speechSynthesis" in window)) return status("Read-aloud isn't supported in this browser.");
+  const synth = window.speechSynthesis;
+  if (synth.speaking) { synth.cancel(); els.readPoem.textContent = "Read aloud"; return; }
+  const lines = fullPoem().split("\n").filter(Boolean);
+  els.readPoem.textContent = "Stop";
+  const next = (n) => {
+    if (n >= lines.length) { els.readPoem.textContent = "Read aloud"; return; }
+    const u = new SpeechSynthesisUtterance(lines[n]);
+    u.rate = 0.9; u.pitch = 1; u.lang = els.voice.value === "Hindi" ? "hi-IN" : "en-IN";
+    u.onend = () => setTimeout(() => next(n + 1), 700);
+    u.onerror = () => { els.readPoem.textContent = "Read aloud"; };
+    synth.speak(u);
+  };
+  next(0);
+}
+els.readPoem.addEventListener("click", readAloud);
+els.dialog.addEventListener("close", () => { window.speechSynthesis?.cancel(); els.readPoem.textContent = "Read aloud"; });
+
+// ---------- voice input ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) els.micBtn.hidden = true;
+else els.micBtn.addEventListener("click", () => {
+  const r = new SR();
+  r.lang = els.voice.value === "Hindi" ? "hi-IN" : "en-IN";
+  r.interimResults = false;
+  status("Listening…");
+  r.onresult = (e) => { els.input.value = (els.input.value + " " + e.results[0][0].transcript).trim(); status(""); };
+  r.onerror = () => status("Couldn't hear that. Try again.");
+  r.onend = () => { if (els.status.textContent === "Listening…") status(""); };
+  r.start();
 });
+
+// ---------- poem cards: your 10 cozy olive / cream / maroon patterns ----------
+const PAT_NAMES = ["Soft Dawn","Meadow Mist","Wine Velvet","Ribbon Stripes","Cozy Plaid","Petal Dots","Quilted","Ombre Sky","Evening Bokeh","Ripple"];
+const PAT_INK = ["#5a1822","#f4ebd6","#f4ebd6","#5a1822","#5a1822","#5a1822","#5a1822","#4a121c","#f4ebd6","#5a1822"];
+let cardIdx = 0;
+
+function paintPattern(x, i, W, H) {
+  const u = W / 100;
+  const fill = (c) => { x.fillStyle = c; x.fillRect(0, 0, W, H); };
+  const glow = (px, py, color, r, clip) => {
+    const g = x.createRadialGradient(px, py, 0, px, py, r);
+    g.addColorStop(0, color); g.addColorStop(1, color.replace(/[\d.]+\)$/, "0)"));
+    x.fillStyle = g;
+    if (clip) x.fillRect(clip[0], clip[1], clip[2], clip[2]); else x.fillRect(0, 0, W, H);
+  };
+  const gp = (px, py, color, pct) => {            // percent glow at px%,py%
+    const cx = W * px / 100, cy = H * py / 100;
+    glow(cx, cy, color, pct * Math.hypot(Math.max(cx, W - cx), Math.max(cy, H - cy)));
+  };
+  const lin = (x0, y0, x1, y1, stops) => {
+    const g = x.createLinearGradient(x0, y0, x1, y1);
+    stops.forEach(([p, c]) => g.addColorStop(p, c)); x.fillStyle = g; x.fillRect(0, 0, W, H);
+  };
+  const tri = (color, off) => {
+    const s = 16 * u; x.fillStyle = color;
+    for (let tx = off - s; tx < W; tx += s) for (let ty = off - s; ty < H; ty += s) {
+      x.beginPath(); x.moveTo(tx, ty + s); x.lineTo(tx, ty + s / 2); x.lineTo(tx + s / 2, ty + s); x.fill();
+      x.beginPath(); x.moveTo(tx + s / 2, ty); x.lineTo(tx + s, ty); x.lineTo(tx + s, ty + s / 2); x.fill();
+    }
+  };
+  if (i === 0) { fill("#f1e6cb"); gp(85,12,"rgba(255,252,240,.85)",.5); gp(92,96,"rgba(125,42,54,.4)",.58); gp(10,8,"rgba(138,146,80,.55)",.55); }
+  else if (i === 1) { fill("#68703a"); gp(85,18,"rgba(168,175,110,.5)",.5); gp(88,88,"rgba(125,42,54,.6)",.58); gp(20,15,"rgba(244,235,214,.38)",.55); }
+  else if (i === 2) { fill("#561822"); gp(50,50,"rgba(125,42,54,.55)",.65); gp(82,8,"rgba(244,235,214,.25)",.52); gp(15,88,"rgba(138,146,80,.5)",.55); }
+  else if (i === 3) lin(0, 0, W, 0, [[0,"#f4ebd6"],[.22,"#d6d3a4"],[.44,"#e6bcb9"],[.62,"#f4ebd6"],[.82,"#bcc28f"],[1,"#f4ebd6"]]);
+  else if (i === 4) {
+    fill("#f4ebd6");
+    x.fillStyle = "rgba(125,42,54,.2)"; for (let k = 0; k * 12 * u < W; k++) x.fillRect(k * 12 * u, 0, 6 * u, H);
+    x.fillStyle = "rgba(92,99,48,.24)"; for (let k = 0; H - k * 12 * u > -6 * u; k++) x.fillRect(0, H - 6 * u - k * 12 * u, W, 6 * u);
+  } else if (i === 5) {
+    fill("#eee1c2"); const s = 36 * u;
+    for (let tx = 0; tx < W; tx += s) for (let ty = 0; ty < H; ty += s) {
+      x.save(); x.beginPath(); x.rect(tx, ty, s, s); x.clip();
+      glow(tx + .75*s, ty + .22*s, "rgba(255,252,240,.9)", 9*u);
+      glow(tx + .75*s, ty + .75*s, "rgba(125,42,54,.38)", 12*u);
+      glow(tx + .25*s, ty + .25*s, "rgba(138,146,80,.55)", 10*u);
+      x.restore();
+    }
+  } else if (i === 6) { fill("#f4ebd6"); tri("rgba(125,42,54,.2)", 8 * u); tri("rgba(138,146,80,.3)", 0); }
+  else if (i === 7) lin(0, 0, 0, H, [[0,"#f6eedb"],[.3,"#ebd2c4"],[.65,"#cdd2a4"],[1,"#aab17b"]]);
+  else if (i === 8) {
+    const a = 160 * Math.PI / 180, dx = Math.sin(a), dy = -Math.cos(a), len = Math.abs(W * dx) + Math.abs(H * dy);
+    lin(W/2 - dx*len/2, H/2 - dy*len/2, W/2 + dx*len/2, H/2 + dy*len/2, [[0,"#4a2420"],[1,"#3d4220"]]);
+    glow(.12*W, .88*H, "rgba(244,235,214,.14)", 18*u); glow(.55*W, .78*H, "rgba(168,175,110,.32)", 24*u);
+    glow(.78*W, .30*H, "rgba(160,60,72,.5)", 26*u); glow(.20*W, .20*H, "rgba(244,235,214,.2)", 22*u);
+  } else {
+    fill("#f4ebd6"); const cx = W / 2, cy = 1.25 * H; x.lineWidth = 8 * u;
+    for (let r = 0; r < Math.hypot(cx, cy) + 24 * u; r += 24 * u) {
+      x.strokeStyle = "rgba(125,42,54,.2)"; x.beginPath(); x.arc(cx, cy, r + 4 * u, 0, 7); x.stroke();
+      x.strokeStyle = "rgba(138,146,80,.24)"; x.beginPath(); x.arc(cx, cy, r + 12 * u, 0, 7); x.stroke();
+    }
+  }
+}
+
+function wrapText(x, text, maxW) {
+  const out = [];
+  text.split("\n").forEach((line) => {
+    let cur = "";
+    line.split(" ").forEach((w) => {
+      const t = cur ? cur + " " + w : w;
+      if (x.measureText(t).width > maxW && cur) { out.push(cur); cur = w; } else cur = t;
+    });
+    out.push(cur);
+  });
+  return out;
+}
+
+function drawCard(canvas, i, title, poem, name) {
+  const W = canvas.width, H = canvas.height, u = W / 100, x = canvas.getContext("2d");
+  paintPattern(x, i, W, H);
+  x.fillStyle = PAT_INK[i]; x.textAlign = "center";
+  x.globalAlpha = .85; x.font = `italic 400 ${3.6*u}px Fraunces, Georgia, serif`;
+  x.fillText("Made with INKSPARK", W / 2, 8*u + 3.9*u); x.globalAlpha = 1;
+  if (name) { x.font = `700 ${6.4*u}px Caveat, cursive`; x.fillText(name, W / 2, H - 8*u - 2.4*u); }
+  const top = 17.4 * u, avail = H - 21.6 * u - top, maxW = W - 18 * u;
+  let fs = 7.2 * u, tl, bl, th, hh;
+  for (;;) {
+    x.font = `700 ${fs*1.45}px Caveat, cursive`; tl = title ? wrapText(x, title, maxW) : [];
+    x.font = `500 ${fs}px Caveat, cursive`; bl = wrapText(x, poem, maxW);
+    th = tl.length * fs * 1.45 * 1.1; hh = th + (tl.length ? 3 * u : 0) + bl.length * fs * 1.3;
+    if (hh <= avail || fs <= 3.4 * u) break; fs -= .3 * u;
+  }
+  let y = top + (avail - hh) / 2;
+  x.font = `700 ${fs*1.45}px Caveat, cursive`;
+  tl.forEach((l) => { x.fillText(l, W / 2, y + fs * 1.45 * .85); y += fs * 1.45 * 1.1; });
+  if (tl.length) y += 3 * u;
+  x.font = `500 ${fs}px Caveat, cursive`;
+  bl.forEach((l) => { x.fillText(l, W / 2, y + fs * 1.3 * .75); y += fs * 1.3; });
+}
+
+async function updateCard() {
+  try { await Promise.all(["italic 40px Fraunces", "700 40px Caveat", "500 40px Caveat"].map((f) => document.fonts.load(f))); } catch {}
+  const t = poemTitle();
+  drawCard(els.cardPreview, cardIdx, t === "Your poem" ? "" : t, fullPoem(), els.cardName.value.trim());
+  els.cardLabel.textContent = `${PAT_NAMES[cardIdx]} (${cardIdx + 1}/10)`;
+}
+function saveCard() {
+  const a = Object.assign(document.createElement("a"), { href: els.cardPreview.toDataURL("image/png"), download: "inkspark-card.png" });
+  a.click();
+}
+els.cardPrev.addEventListener("click", () => { cardIdx = (cardIdx + 9) % 10; updateCard(); });
+els.cardNext.addEventListener("click", () => { cardIdx = (cardIdx + 1) % 10; updateCard(); });
+els.cardName.addEventListener("input", updateCard);
+els.saveCard.addEventListener("click", saveCard);
 
 // hide the picture button if the server has no image-capable provider
 fetch("/api/config").then((r) => r.json()).then((c) => {
